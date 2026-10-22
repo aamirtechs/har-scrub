@@ -1,0 +1,19 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node (roadmap CLI only; the web tool needs nothing)
+node_modules/
+
+# Never commit real HAR files, scrubbed or not
+*.har
+
+# Temp
+*.tmp

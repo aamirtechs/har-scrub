@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>har-scrub: HAR file sanitizer with proof</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#0a1122; --navy2:#0e1830; --navy3:#13203f; --line:#22335c;
+    --gold:#e0b73f; --gold2:#c99b24; --ink:#eef2fb; --muted:#9fb0cf;
+    --good:#3ecf7a; --bad:#ff6b6b; --warn:#ffb84d; --card:#101c38;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--navy);color:var(--ink);font-family:"Plus Jakarta Sans",system-ui,sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:28px 20px 70px}
+  header.top{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+  .logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,var(--gold),var(--gold2));display:flex;align-items:center;justify-content:center;font-family:Sora,sans-serif;font-weight:800;font-size:22px;color:#14100a}
+  h1{font-family:Sora,sans-serif;font-size:30px;margin:0;letter-spacing:.2px}
+  h1 span{color:var(--gold)}
+  .tag{color:var(--muted);font-size:15px;margin:2px 0 18px}
+  .privacy{background:linear-gradient(90deg,#14301f,#0e1830);border:1px solid #2c7a4b;border-radius:12px;padding:13px 16px;font-size:14.5px;margin-bottom:20px}
+  .privacy b{color:var(--good)}
+  .drop{border:2px dashed var(--line);border-radius:16px;background:var(--navy2);padding:34px 20px;text-align:center;transition:.15s}
+  .drop.over{border-color:var(--gold);background:var(--navy3)}
+  .drop p{margin:6px 0;color:var(--muted)}
+  .drop .big{font-family:Sora,sans-serif;font-size:19px;color:var(--ink);font-weight:700}
+  .btn{font-family:"Plus Jakarta Sans",sans-serif;font-weight:700;font-size:14.5px;border:0;border-radius:10px;padding:11px 18px;cursor:pointer;background:var(--gold);color:#171106}
+  .btn:hover{background:#efc95a}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+  .btn.ghost:hover{border-color:var(--gold);color:var(--gold)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:16px 0}
+  label.toggle{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--muted);cursor:pointer}
+  label.toggle input{accent-color:var(--gold);width:17px;height:17px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:16px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .panel h2{font-family:Sora,sans-serif;font-size:16.5px;margin:0 0 12px}
+  .panel h2 .gold{color:var(--gold)}
+  .stat{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1b2a4d;font-size:14.5px}
+  .stat:last-child{border-bottom:0}
+  .stat b{font-family:"IBM Plex Mono",monospace;font-weight:600}
+  .mono{font-family:"IBM Plex Mono",monospace;font-size:13px}
+  .domains{word-break:break-all;color:var(--muted);font-size:13px;line-height:1.7}
+  .verdict{border-radius:12px;padding:14px 16px;font-family:Sora,sans-serif;font-weight:700;font-size:16px;text-align:center}
+  .verdict.pass{background:#12351f;border:1px solid var(--good);color:var(--good)}
+  .verdict.fail{background:#3d1620;border:1px solid var(--bad);color:var(--bad)}
+  .verdict.idle{background:var(--navy3);border:1px solid var(--line);color:var(--muted)}
+  ul.findings{margin:0;padding-left:18px;color:var(--muted);font-size:14px;line-height:1.75}
+  .hidden{display:none}
+  footer{margin-top:34px;color:var(--muted);font-size:13px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px}
+  .fname{font-family:"IBM Plex Mono",monospace;color:var(--gold);font-size:13.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="logo">h</div>
+    <div>
+      <h1>har<span>-scrub</span></h1>
+      <div class="tag">Deep HAR sanitizing, with a re-scan that proves it.</div>
+    </div>
+  </header>
+
+  <div class="privacy"><b>100% local.</b> Your HAR file is parsed and scrubbed inside this page with the FileReader API. Nothing is uploaded, no server ever sees it, and closing the tab destroys it. Browser "sanitized" exports only hide three headers. This goes through URLs, query parameters and bodies, then scans its own output to prove it.</div>
+
+  <div class="drop" id="drop">
+    <div class="big">Drop a .har file here</div>
+    <p>or</p>
+    <button class="btn" id="pickBtn" type="button">Choose a HAR file</button>
+    <input type="file" id="fileInput" accept=".har,application/json" class="hidden">
+    <p id="fileName" class="fname"></p>
+  </div>
+
+  <div class="row">
+    <label class="toggle"><input type="checkbox" id="emailToggle" checked> Also redact email addresses in bodies and URLs</label>
+    <button class="btn ghost" id="demoBtn" type="button">Run the demo (fake HAR, planted secrets)</button>
+    <button class="btn" id="downloadBtn" type="button" disabled>Download scrubbed .har</button>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>File summary</h2>
+      <div id="summaryBody"><p class="domains">No file loaded yet. The demo is a good place to start.</p></div>
+    </div>
+    <div class="panel">
+      <h2>What got scrubbed</h2>
+      <div id="countsBody"><p class="domains">Counts per category will appear here after a scrub.</p></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Re-scan proof <span class="gold">(the headline feature)</span></h2>
+      <div class="verdict idle" id="verdictBox">No scrub run yet</div>
+      <div id="rescanBody" style="margin-top:12px"><p class="domains">After scrubbing, the full detector suite runs again over the scrubbed output. Whatever it still finds is shown here, honestly, line by line.</p></div>
+    </div>
+    <div class="panel">
+      <h2>Findings report</h2>
+      <ul class="findings" id="findingsList"><li>Nothing to report yet.</li></ul>
+    </div>
+  </div>
+
+  <footer>
+    Pattern based, and honest about it: har-scrub cannot see secrets hidden inside images, binary payloads or base64-encoded bodies, and no automated scrub replaces a human review before you share a HAR file. Every replacement uses the fixed placeholder REDACTED so diffs stay readable. Detector and scrubber share one pattern library, so the proof scan tests exactly what the scrubber claims to remove.
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* har-scrub core engine. ONE pattern library shared by the scrubber and the
+   re-scan detector, so the proof scan tests exactly what the scrubber claims. */
+var PLACEHOLDER = "REDACTED";
+
+var HS = {
+  exactHeaders: ["cookie","set-cookie","authorization","proxy-authorization","x-api-key","x-apikey",
+    "x-auth-token","x-auth","x-session-id","x-session","x-sessionid","x-access-token","x-refresh-token",
+    "x-id-token","x-csrf-token","x-xsrf-token","x-password","x-secret","api-key","apikey","auth-token",
+    "session-id","access-token","refresh-token"],
+  headerHints: ["token","secret","api-key","apikey","session","cookie","password","auth"],
+  exactParams: ["token","api_key","apikey","session","sid","auth","password","passwd","secret",
+    "access_token","refresh_token","id_token","code","key","api-key","client_secret","session_id",
+    "sessionid","auth_token","access-token","refresh-token","jwt","signature","credential","credentials"],
+  paramHints: ["token","secret","password","passwd","session","apikey","api_key"],
+  exactJsonKeys: ["password","passwd","pwd","pass","passcode","token","access_token","refresh_token",
+    "id_token","secret","client_secret","session","sessionid","session_id","auth","authorization",
+    "card","card_number","cardnumber","credit_card","creditcard","cvv","cvc","ssn","ssn_number",
+    "api_key","apikey","api-key","private_key","pin"],
+  jsonKeyHints: ["password","passwd","token","secret","session","cvv","ssn"],
+  jwtRe: /eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*/g,
+  emailRe: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
+};
+
+function hsIsSensitiveHeader(name){
+  var n = String(name || "").toLowerCase().trim();
+  if (HS.exactHeaders.indexOf(n) !== -1) return true;
+  for (var i = 0; i < HS.headerHints.length; i++){ if (n.indexOf(HS.headerHints[i]) !== -1) return true; }
+  return false;
+}
+function hsHeaderCategory(name){
+  var n = String(name || "").toLowerCase().trim();
+  if (n === "cookie" || n === "set-cookie") return "cookieHeaders";
+  if (n === "authorization" || n === "proxy-authorization") return "authorizationHeaders";
+  return "sensitiveHeaders";
+}
+function hsIsSensitiveParam(name){
+  var n = String(name || "").toLowerCase().trim();
+  if (HS.exactParams.indexOf(n) !== -1) return true;
+  for (var i = 0; i < HS.paramHints.length; i++){ if (n.indexOf(HS.paramHints[i]) !== -1) return true; }
+  return false;
+}
+function hsIsSensitiveJsonKey(key){
+  var n = String(key || "").toLowerCase().trim();
+  if (HS.exactJsonKeys.indexOf(n) !== -1) return true;
+  for (var i = 0; i < HS.jsonKeyHints.length; i++){ if (n.indexOf(HS.jsonKeyHints[i]) !== -1) return true; }
+  if (n.indexOf("card") !== -1 && n.indexOf("cardinal") === -1) return true;
+  return false;
+}
+function hsEmptyCounts(){
+  return { cookieHeaders:0, authorizationHeaders:0, sensitiveHeaders:0, queryParams:0, bodyFields:0, jwts:0, emails:0 };
+}
+function hsCountMatches(text, re){
+  if (!text) return 0;
+  var m = String(text).match(re);
+  return m ? m.length : 0;
+}
+/* Replace JWTs (and optionally emails) inside a surviving string. */
+function hsScrubText(text, counts, opts){
+  if (typeof text !== "string" || !text) return text;
+  var out = text.replace(HS.jwtRe, function(){ counts.jwts++; return PLACEHOLDER; });
+  if (opts && opts.emails){ out = out.replace(HS.emailRe, function(){ counts.emails++; return PLACEHOLDER; }); }
+  return out;
+}
+function hsScrubJsonValue(value, counts, opts){
+  if (Array.isArray(value)){
+    return value.map(function(v){ return hsScrubJsonValue(v, counts, opts); });
+  }
+  if (value && typeof value === "object"){
+    var out = {};
+    Object.keys(value).forEach(function(k){
+      if (hsIsSensitiveJsonKey(k)){
+        if (value[k] !== PLACEHOLDER){ counts.bodyFields++; }
+        out[k] = PLACEHOLDER;
+      } else {
+        out[k] = hsScrubJsonValue(value[k], counts, opts);
+      }
+    });
+    return out;
+  }
+  if (typeof value === "string"){ return hsScrubText(value, counts, opts); }
+  return value;
+}
+function hsScrubBodyText(text, counts, opts){
+  if (typeof text !== "string" || !text) return text;
+  var trimmed = text.trim();
+  if (trimmed.charAt(0) === "{" || trimmed.charAt(0) === "["){
+    try {
+      var parsed = JSON.parse(text);
+      return JSON.stringify(hsScrubJsonValue(parsed, counts, opts));
+    } catch (e) { /* not JSON after all, fall through to text scrub */ }
+  }
+  return hsScrubText(text, counts, opts);
+}
+function hsScrubUrl(url, counts, opts){
+  if (typeof url !== "string" || !url) return url;
+  var out = url, hash = "", q = "";
+  var hashIdx = out.indexOf("#");
+  if (hashIdx !== -1){ hash = out.slice(hashIdx); out = out.slice(0, hashIdx); }
+  var qIdx = out.indexOf("?");
+  if (qIdx !== -1){
+    var base = out.slice(0, qIdx);
+    var pairs = out.slice(qIdx + 1).split("&").map(function(pair){
+      var eq = pair.indexOf("=");
+      if (eq === -1) return pair;
+      var name = pair.slice(0, eq), val = pair.slice(eq + 1);
+      var decoded = name;
+      try { decoded = decodeURIComponent(name); } catch (e) {}
+      if (hsIsSensitiveParam(decoded) && val !== PLACEHOLDER){ counts.queryParams++; return name + "=" + PLACEHOLDER; }
+      return pair;
+    });
+    q = "?" + pairs.join("&");
+    out = base + q;
+  }
+  out = hsScrubText(out, counts, opts);
+  return out + (out.indexOf("#") === -1 ? hash : "");
+}
+function hsScrubHeaders(headers, counts, opts){
+  if (!Array.isArray(headers)) return headers;
+  return headers.map(function(h){
+    if (!h || typeof h !== "object") return h;
+    var copy = {}; Object.keys(h).forEach(function(k){ copy[k] = h[k]; });
+    if (typeof copy.value === "string"){
+      if (hsIsSensitiveHeader(copy.name)){
+        counts.jwts += hsCountMatches(copy.value, HS.jwtRe);
+        if (copy.value !== PLACEHOLDER){ counts[hsHeaderCategory(copy.name)]++; }
+        copy.value = PLACEHOLDER;
+      } else {
+        copy.value = hsScrubText(copy.value, counts, opts);
+      }
+    }
+    return copy;
+  });
+}
+function hsScrubCookies(cookies, counts){
+  if (!Array.isArray(cookies)) return cookies;
+  return cookies.map(function(c){
+    if (!c || typeof c !== "object") return c;
+    var copy = {}; Object.keys(c).forEach(function(k){ copy[k] = c[k]; });
+    if (typeof copy.value === "string" && copy.value && copy.value !== PLACEHOLDER){ counts.cookieHeaders++; copy.value = PLACEHOLDER; }
+    return copy;
+  });
+}
+function hsScrubHar(har, opts){
+  opts = opts || {};
+  var counts = hsEmptyCounts();
+  var work = JSON.parse(JSON.stringify(har));
+  var entries = (work && work.log && Array.isArray(work.log.entries)) ? work.log.entries : [];
+  entries.forEach(function(entry){
+    [entry.request, entry.response].forEach(function(side){
+      if (!side) return;
+      if (side.url) side.url = hsScrubUrl(side.url, counts, opts);
+      if (side.headers) side.headers = hsScrubHeaders(side.headers, counts, opts);
+      if (side.cookies) side.cookies = hsScrubCookies(side.cookies, counts);
+      if (Array.isArray(side.queryString)){
+        side.queryString.forEach(function(qp){
+          if (qp && hsIsSensitiveParam(qp.name) && qp.value !== PLACEHOLDER){ qp.value = PLACEHOLDER; }
+        });
+      }
+    });
+    var req = entry.request || {};
+    if (req.postData && typeof req.postData.text === "string"){
+      if (req.postData.encoding === "base64"){ /* encoded blob: cannot inspect, see limits */ }
+      else req.postData.text = hsScrubBodyText(req.postData.text, counts, opts);
+    }
+    var res = entry.response || {};
+    if (res.content && typeof res.content.text === "string"){
+      if (res.content.encoding === "base64"){ /* encoded blob: cannot inspect, see limits */ }
+      else res.content.text = hsScrubBodyText(res.content.text, counts, opts);
+    }
+  });
+  return { scrubbed: work, counts: counts };
+}
+
+/* Detector: the same pattern library, looking for anything NOT yet redacted. */
+function hsDetectJsonValue(value, counts){
+  if (Array.isArray(value)){ value.forEach(function(v){ hsDetectJsonValue(v, counts); }); return; }
+  if (value && typeof value === "object"){
+    Object.keys(value).forEach(function(k){
+      if (hsIsSensitiveJsonKey(k)){
+        if (value[k] !== PLACEHOLDER) counts.bodyFields++;
+      } else hsDetectJsonValue(value[k], counts);
+    });
+    return;
+  }
+}
+function hsDetectBodyText(text, counts, opts){
+  if (typeof text !== "string" || !text) return;
+  counts.jwts += hsCountMatches(text, HS.jwtRe);
+  if (opts && opts.emails) counts.emails += hsCountMatches(text, HS.emailRe);
+  var trimmed = text.trim();
+  if (trimmed.charAt(0) === "{" || trimmed.charAt(0) === "["){
+    try { hsDetectJsonValue(JSON.parse(text), counts); } catch (e) {}
+  }
+}
+function hsDetectHar(har, opts){
+  opts = opts || {};
+  var counts = hsEmptyCounts();
+  var entries = (har && har.log && Array.isArray(har.log.entries)) ? har.log.entries : [];
+  entries.forEach(function(entry){
+    [entry.request, entry.response].forEach(function(side){
+      if (!side) return;
+      if (Array.isArray(side.headers)){
+        side.headers.forEach(function(h){
+          if (!h) return;
+          if (hsIsSensitiveHeader(h.name) && h.value !== PLACEHOLDER) counts[hsHeaderCategory(h.name)]++;
+          else if (typeof h.value === "string"){
+            counts.jwts += hsCountMatches(h.value, HS.jwtRe);
+            if (opts.emails) counts.emails += hsCountMatches(h.value, HS.emailRe);
+          }
+        });
+      }
+      if (Array.isArray(side.cookies)){
+        side.cookies.forEach(function(c){ if (c && c.value && c.value !== PLACEHOLDER) counts.cookieHeaders++; });
+      }
+      if (typeof side.url === "string"){
+        counts.jwts += hsCountMatches(side.url, HS.jwtRe);
+        if (opts.emails) counts.emails += hsCountMatches(side.url, HS.emailRe);
+        var qIdx = side.url.indexOf("?");
+        if (qIdx !== -1){
+          side.url.slice(qIdx + 1).split("#")[0].split("&").forEach(function(pair){
+            var eq = pair.indexOf("=");
+            if (eq === -1) return;
+            var name = pair.slice(0, eq), val = pair.slice(eq + 1), dec = name;
+            try { dec = decodeURIComponent(name); } catch (e) {}
+            if (hsIsSensitiveParam(dec) && val !== PLACEHOLDER) counts.queryParams++;
+          });
+        }
+      }
+    });
+    var req = entry.request || {};
+    if (req.postData && typeof req.postData.text === "string" && req.postData.encoding !== "base64"){
+      hsDetectBodyText(req.postData.text, counts, opts);
+    }
+    var res = entry.response || {};
+    if (res.content && typeof res.content.text === "string" && res.content.encoding !== "base64"){
+      hsDetectBodyText(res.content.text, counts, opts);
+    }
+  });
+  return counts;
+}
+function hsTotalCounts(counts){
+  return Object.keys(counts).reduce(function(sum, k){ return sum + counts[k]; }, 0);
+}
+function hsSummarizeHar(har){
+  var entries = (har && har.log && Array.isArray(har.log.entries)) ? har.log.entries : [];
+  var domains = {};
+  entries.forEach(function(e){
+    var u = e && e.request && e.request.url;
+    if (u){ try { domains[new URL(u).hostname] = true; } catch (err) { domains["(unparseable URL)"] = true; } }
+  });
+  return {
+    entries: entries.length,
+    domains: Object.keys(domains).sort(),
+    bytes: JSON.stringify(har).length
+  };
+}
+function hsJwtAlg(jwt){
+  try {
+    var seg = jwt.split(".")[0].replace(/-/g, "+").replace(/_/g, "/");
+    var json = (typeof atob === "function") ? atob(seg) : Buffer.from(seg, "base64").toString("utf8");
+    var head = JSON.parse(json);
+    return head.alg || null;
+  } catch (e) { return null; }
+}
+var HarScrub = { PLACEHOLDER: PLACEHOLDER, scrubHar: hsScrubHar, detectHar: hsDetectHar,
+  summarizeHar: hsSummarizeHar, total: hsTotalCounts, jwtAlg: hsJwtAlg,
+  isSensitiveHeader: hsIsSensitiveHeader, isSensitiveParam: hsIsSensitiveParam, isSensitiveJsonKey: hsIsSensitiveJsonKey };
+if (typeof module !== "undefined" && module.exports) module.exports = HarScrub;
+if (typeof window !== "undefined") window.HarScrub = HarScrub;
+</script>
+
+<script>
+"use strict";
+(function(){
+  var drop = document.getElementById("drop"), pickBtn = document.getElementById("pickBtn"),
+      fileInput = document.getElementById("fileInput"), fileNameEl = document.getElementById("fileName"),
+      emailToggle = document.getElementById("emailToggle"), demoBtn = document.getElementById("demoBtn"),
+      downloadBtn = document.getElementById("downloadBtn"), summaryBody = document.getElementById("summaryBody"),
+      countsBody = document.getElementById("countsBody"), verdictBox = document.getElementById("verdictBox"),
+      rescanBody = document.getElementById("rescanBody"), findingsList = document.getElementById("findingsList");
+  var currentScrubbed = null, currentName = "scrubbed.har";
+
+  var LABELS = { cookieHeaders:"Cookie and Set-Cookie headers", authorizationHeaders:"Authorization headers",
+    sensitiveHeaders:"Other sensitive headers (api key, session, token)", queryParams:"Sensitive URL query parameters",
+    bodyFields:"Sensitive fields in JSON bodies", jwts:"JWT strings", emails:"Email addresses" };
+
+  function fmtBytes(n){ if (n < 1024) return n + " B"; if (n < 1048576) return (n/1024).toFixed(1) + " KB"; return (n/1048576).toFixed(2) + " MB"; }
+  function rows(counts){
+    return Object.keys(LABELS).map(function(k){
+      return '<div class="stat"><span>' + LABELS[k] + '</span><b>' + counts[k] + '</b></div>';
+    }).join("");
+  }
+  function runFlow(har, label){
+    var opts = { emails: emailToggle.checked };
+    var before = HarScrub.detectHar(har, opts);
+    var result = HarScrub.scrubHar(har, opts);
+    var after = HarScrub.detectHar(result.scrubbed, opts);
+    var summary = HarScrub.summarizeHar(har);
+    currentScrubbed = result.scrubbed;
+
+    summaryBody.innerHTML =
+      '<div class="stat"><span>Source</span><b>' + label + '</b></div>' +
+      '<div class="stat"><span>Entries</span><b>' + summary.entries + '</b></div>' +
+      '<div class="stat"><span>Original size</span><b>' + fmtBytes(summary.bytes) + '</b></div>' +
+      '<div class="stat"><span>Scrubbed size</span><b>' + fmtBytes(JSON.stringify(result.scrubbed).length) + '</b></div>' +
+      '<p class="domains" style="margin-top:10px">Domains seen: ' + (summary.domains.join(", ") || "none") + '</p>';
+
+    countsBody.innerHTML = rows(result.counts) +
+      '<div class="stat"><span><b>Total replacements</b></span><b>' + HarScrub.total(result.counts) + '</b></div>';
+
+    var remaining = HarScrub.total(after);
+    if (remaining === 0){
+      verdictBox.className = "verdict pass";
+      verdictBox.textContent = "RE-SCAN CLEAN: 0 detectable secrets remain";
+      rescanBody.innerHTML = '<p class="domains">The detector suite ran over the scrubbed output and found nothing left in any category it covers. Categories checked: ' + Object.keys(LABELS).length + '.</p>' + rows(after);
+    } else {
+      verdictBox.className = "verdict fail";
+      verdictBox.textContent = "RE-SCAN FOUND " + remaining + " ITEM(S) STILL PRESENT";
+      rescanBody.innerHTML = '<p class="domains" style="color:var(--bad)">Shown honestly, never hidden. Review these before sharing the file:</p>' + rows(after);
+    }
+
+    var findings = [];
+    Object.keys(LABELS).forEach(function(k){
+      if (result.counts[k] > 0) findings.push("Scrubbed " + result.counts[k] + " x " + LABELS[k].toLowerCase() + ".");
+      if (after[k] > 0) findings.push("STILL PRESENT after scrub: " + after[k] + " x " + LABELS[k].toLowerCase() + ".");
+    });
+    if (HarScrub.total(before) === 0) findings.push("The original file had no detectable secrets in the covered categories.");
+    findings.push("Reminder: secrets inside images, binary payloads or base64 bodies are outside what pattern scanning can see. Review before sharing.");
+    findingsList.innerHTML = findings.map(function(f){ return "<li>" + f + "</li>"; }).join("");
+    downloadBtn.disabled = false;
+  }
+
+  function handleFile(file){
+    if (!file) return;
+    fileNameEl.textContent = file.name + " (" + fmtBytes(file.size) + ")";
+    currentName = file.name.replace(/\.har$/i, "") + ".scrubbed.har";
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        var har = JSON.parse(reader.result);
+        if (!har.log || !Array.isArray(har.log.entries)) throw new Error("no log.entries");
+        runFlow(har, "your file, parsed locally");
+      } catch (e) {
+        verdictBox.className = "verdict fail";
+        verdictBox.textContent = "That file could not be parsed as a HAR file";
+        findingsList.innerHTML = "<li>Parsing failed locally. No data went anywhere.</li>";
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  pickBtn.addEventListener("click", function(){ fileInput.click(); });
+  fileInput.addEventListener("change", function(){ handleFile(fileInput.files[0]); });
+  ["dragenter","dragover"].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add("over"); }); });
+  ["dragleave","drop"].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove("over"); }); });
+  drop.addEventListener("drop", function(e){ handleFile(e.dataTransfer.files[0]); });
+
+  downloadBtn.addEventListener("click", function(){
+    if (!currentScrubbed) return;
+    var blob = new Blob([JSON.stringify(currentScrubbed, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = currentName;
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
+  });
+
+  demoBtn.addEventListener("click", function(){
+    var jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkRlbW8gVXNlciJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    var demoHar = { log: { version: "1.2", creator: { name: "har-scrub demo", version: "1.0" }, entries: [
+      { startedDateTime: "2026-10-22T00:00:00.000Z", time: 42,
+        request: { method: "POST", url: "https://api.example.com/login?access_token=abc123secret&next=/home",
+          headers: [ { name: "Cookie", value: "sessionid=topsecretcookie; theme=dark" },
+                     { name: "Authorization", value: "Bearer " + jwt },
+                     { name: "Content-Type", value: "application/json" } ],
+          postData: { mimeType: "application/json", text: JSON.stringify({ user: "demo", password: "hunter2", nested: { api_token: "xyz-987", note: "call me back" } }) } },
+        response: { status: 200, headers: [ { name: "Set-Cookie", value: "sessionid=topsecretcookie; HttpOnly" } ],
+          content: { mimeType: "application/json", text: JSON.stringify({ ok: true, contact: "demo.user@example.com", message: "Welcome to our store" }) } } },
+      { startedDateTime: "2026-10-22T00:01:00.000Z", time: 15,
+        request: { method: "GET", url: "https://example.com/about", headers: [ { name: "Accept", value: "text/html" } ] },
+        response: { status: 200, headers: [], content: { mimeType: "text/plain", text: "Welcome to our store. Opening hours 9 to 5." } } }
+    ] } };
+    fileNameEl.textContent = "demo.har (generated in memory, nothing was loaded from disk)";
+    currentName = "demo.scrubbed.har";
+    runFlow(demoHar, "built-in demo");
+  });
+})();
+</script>
+</body>
+</html>
